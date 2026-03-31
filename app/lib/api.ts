@@ -4,7 +4,7 @@ export async function fetchLeads() {
   const token = getToken();
 
   if (!token) {
-    throw new Error('NO_TOKEN');
+    return [];
   }
 
   const response = await fetch('http://localhost:3001/leads', {
@@ -15,7 +15,7 @@ export async function fetchLeads() {
 
   if (response.status === 401) {
     removeToken();
-    throw new Error('UNAUTHORIZED');
+    return [];
   }
 
   if (!response.ok) {
