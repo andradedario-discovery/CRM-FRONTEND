@@ -1,95 +1,2094 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { fetchLeads } from '@/app/lib/api';
+import * as XLSX from 'xlsx';
 
-export default function LeadsPage() {
-  const [leads, setLeads] = useState<any[]>([]);
+type TabType = 'Cobranzas' | 'Jurídico';
+
+type BlockFilter =
+  | 'Todos'
+  | 'Crítico'
+  | 'Muy urgente'
+  | 'Urgente'
+  | 'Prioritario'
+  | 'Normal';
+
+type PipelineStatus =
+  | 'Sin gestionar'
+  | 'Contactado'
+  | 'En proceso'
+  | 'Incumplido';
+
+type WhatsAppStatus =
+  | 'Sin enviar'
+  | 'Enviado'
+  | 'Entregado'
+  | 'Respondió'
+  | 'Sin respuesta'
+  | 'Solo fijo'
+  | 'Número inválido';
+
+type CallStatus =
+  | 'Sin llamar'
+  | 'Llamando'
+  | 'Contestó'
+  | 'No contestó'
+  | 'Número inválido';
+
+type PhoneType = 'celular' | 'fijo' | 'invalido';
+
+type HistoryItem = {
+  id: string;
+  date: string;
+  type:
+    | 'whatsapp'
+    | 'call'
+    | 'note'
+    | 'promise'
+    | 'action'
+    | 'status'
+    | 'assign'
+    | 'import';
+  text: string;
+};
+
+type ClientTracking = {
+  status: PipelineStatus;
+  promiseDate: string;
+  promiseAmount: string;
+  nextActionDate: string;
+  nextActionText: string;
+  notes: string;
+  operator: string;
+  gestor: string;
+};
+
+type CobranzaRow = {
+  id: string;
+  nombre: string;
+  identificacion: string;
+  telefono: string;
+  telefonoOriginal: string;
+  telefonoTipo: PhoneType;
+  telefonoWhatsapp: string;
+  telefonoLlamada: string;
+  whatsappStatus: WhatsAppStatus;
+  callStatus: CallStatus;
+  diasMora: number;
+  monto: number;
+  bloque: BlockFilter;
+  NumeroJuicio: string;
+  direccion: string;
+  parroquia: string;
+  ciudad: string;
+  provincia: string;
+  sector: string;
+  tipoOperacion: string;
+  totalVencido: number;
+  garantia: string;
+  seguimiento: ClientTracking;
+  historial: HistoryItem[];
+  raw?: Record<string, any>;
+};
+
+type AssignScope = 'selected' | 'visible' | 'block' | 'juridico';
+
+const STORAGE_KEY = 'crm_cobranzas_rows_v11';
+const SELECTED_STORAGE_KEY = 'crm_cobranzas_selected_v11';
+const ACTIVE_TAB_KEY = 'crm_cobranzas_active_tab_v11';
+
+const TEAM = [
+  { operator: 'Operador 1', gestor: 'Gestor 1' },
+  { operator: 'Operador 2', gestor: 'Gestor 2' },
+  { operator: 'Operador 3', gestor: 'Gestor 3' },
+  { operator: 'Operador 4', gestor: 'Gestor 4' },
+];
+
+function uid() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function safeString(value: any): string {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function parseMoney(value: any): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const clean = String(value).replace(/[^\d.,-]/g, '').replace(/,/g, '');
+  const n = Number(clean);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseIntSafe(value: any): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const clean = String(value).replace(/[^\d-]/g, '');
+  const n = Number(clean);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeKey(s: string): string {
+  return String(s)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase();
+}
+
+function getField(row: Record<string, any>, candidates: string[]): any {
+  const directKeys = Object.keys(row || {});
+  const normalizedMap = new Map<string, any>();
+
+  directKeys.forEach((k) => {
+    normalizedMap.set(normalizeKey(k), row[k]);
+  });
+
+  for (const candidate of candidates) {
+    if (
+      row[candidate] !== undefined &&
+      row[candidate] !== null &&
+      String(row[candidate]).trim() !== ''
+    ) {
+      return row[candidate];
+    }
+  }
+
+  for (const candidate of candidates) {
+    const normalized = normalizedMap.get(normalizeKey(candidate));
+    if (normalized !== undefined && normalized !== null && String(normalized).trim() !== '') {
+      return normalized;
+    }
+  }
+
+  return '';
+}
+
+function limpiarNumero(raw: any): string {
+  if (raw === null || raw === undefined) return '';
+  return String(raw).replace(/\D/g, '');
+}
+
+function inferAreaCode(ciudad: string, provincia: string): string {
+  const ref = `${ciudad} ${provincia}`.toLowerCase();
+
+  if (
+    ref.includes('quito') ||
+    ref.includes('pichincha') ||
+    ref.includes('rumiñahui') ||
+    ref.includes('ruminahui') ||
+    ref.includes('mejia') ||
+    ref.includes('mejía')
+  ) {
+    return '02';
+  }
+
+  if (
+    ref.includes('guayaquil') ||
+    ref.includes('guayas') ||
+    ref.includes('duran') ||
+    ref.includes('durán') ||
+    ref.includes('samborondon') ||
+    ref.includes('samborondón')
+  ) {
+    return '04';
+  }
+
+  if (
+    ref.includes('cuenca') ||
+    ref.includes('azuay') ||
+    ref.includes('machala') ||
+    ref.includes('el oro') ||
+    ref.includes('loja')
+  ) {
+    return '07';
+  }
+
+  if (
+    ref.includes('ambato') ||
+    ref.includes('tungurahua') ||
+    ref.includes('riobamba') ||
+    ref.includes('chimborazo') ||
+    ref.includes('latacunga') ||
+    ref.includes('cotopaxi')
+  ) {
+    return '03';
+  }
+
+  if (ref.includes('ibarra') || ref.includes('imbabura') || ref.includes('esmeraldas')) {
+    return '06';
+  }
+
+  if (
+    ref.includes('manta') ||
+    ref.includes('portoviejo') ||
+    ref.includes('manabi') ||
+    ref.includes('manabí')
+  ) {
+    return '05';
+  }
+
+  if (
+    ref.includes('santo domingo') ||
+    ref.includes('tsachilas') ||
+    ref.includes('tsáchilas')
+  ) {
+    return '02';
+  }
+
+  return '02';
+}
+
+function normalizarTelefonoEC(
+  raw: any,
+  ciudad = '',
+  provincia = ''
+): {
+  numero: string;
+  tipo: PhoneType;
+  whatsapp: string;
+  llamada: string;
+  valido: boolean;
+} {
+  let num = limpiarNumero(raw);
+
+  if (!num) {
+    return {
+      numero: '',
+      tipo: 'invalido',
+      whatsapp: '',
+      llamada: '',
+      valido: false,
+    };
+  }
+
+  if (num.startsWith('00593')) num = num.slice(5);
+
+  if (num.startsWith('593')) {
+    num = num.slice(3);
+    if (!num.startsWith('0')) num = '0' + num;
+  }
+
+  if (num.length === 9 && num.startsWith('9')) {
+    num = '0' + num;
+  }
+
+  if (num.length > 10 && num.includes('09')) {
+    const idx = num.lastIndexOf('09');
+    const maybe = num.slice(idx, idx + 10);
+    if (maybe.length === 10) num = maybe;
+  }
+
+  if (num.length === 10 && num.startsWith('09')) {
+    return {
+      numero: num,
+      tipo: 'celular',
+      whatsapp: `593${num.slice(1)}`,
+      llamada: num,
+      valido: true,
+    };
+  }
+
+  if (num.length === 9 && num.startsWith('0')) {
+    return {
+      numero: num,
+      tipo: 'fijo',
+      whatsapp: '',
+      llamada: num,
+      valido: true,
+    };
+  }
+
+  if (num.length === 7) {
+    const fijo = `${inferAreaCode(ciudad, provincia)}${num}`;
+    return {
+      numero: fijo,
+      tipo: 'fijo',
+      whatsapp: '',
+      llamada: fijo,
+      valido: true,
+    };
+  }
+
+  return {
+    numero: num,
+    tipo: 'invalido',
+    whatsapp: '',
+    llamada: '',
+    valido: false,
+  };
+}
+
+function getBestPhone(row: Record<string, any>) {
+  const ciudad = safeString(
+    getField(row, ['Ciudad', 'Canton', 'Cantón', 'CiudadDeudor', 'cr_ciudad'])
+  );
+  const provincia = safeString(getField(row, ['Provincia', 'ProvinciaDeudor', 'cr_provincia']));
+
+  const candidates = [
+    { value: getField(row, ['CelularSMSDeudor1']), label: 'CelularSMSDeudor1' },
+    { value: getField(row, ['FonoDomicilioDeudor1']), label: 'FonoDomicilioDeudor1' },
+    { value: getField(row, ['CelularDeudor1']), label: 'CelularDeudor1' },
+    { value: getField(row, ['CelularDeudor2']), label: 'CelularDeudor2' },
+    { value: getField(row, ['FonoDomicilioDeudor2']), label: 'FonoDomicilioDeudor2' },
+    {
+      value: getField(row, ['Telefono', 'Teléfono', 'Telefono1', 'TelefonoPrincipal']),
+      label: 'Telefono',
+    },
+  ];
+
+  for (const c of candidates) {
+    const n = normalizarTelefonoEC(c.value, ciudad, provincia);
+    if (n.tipo === 'celular') {
+      return { ...n, original: safeString(c.value), source: c.label };
+    }
+  }
+
+  for (const c of candidates) {
+    const n = normalizarTelefonoEC(c.value, ciudad, provincia);
+    if (n.tipo === 'fijo') {
+      return { ...n, original: safeString(c.value), source: c.label };
+    }
+  }
+
+  for (const c of candidates) {
+    const n = normalizarTelefonoEC(c.value, ciudad, provincia);
+    if (n.numero) {
+      return { ...n, original: safeString(c.value), source: c.label };
+    }
+  }
+
+  return {
+    numero: '',
+    tipo: 'invalido' as PhoneType,
+    whatsapp: '',
+    llamada: '',
+    valido: false,
+    original: '',
+    source: '',
+  };
+}
+
+function calcularBloque(dias: number, monto: number): BlockFilter {
+  if (dias >= 180 || monto >= 20000) return 'Crítico';
+  if (dias >= 120 || monto >= 10000) return 'Muy urgente';
+  if (dias >= 60 || monto >= 5000) return 'Urgente';
+  if (dias >= 30 || monto >= 1000) return 'Prioritario';
+  return 'Normal';
+}
+
+function defaultTracking(): ClientTracking {
+  return {
+    status: 'Sin gestionar',
+    promiseDate: '',
+    promiseAmount: '',
+    nextActionDate: '',
+    nextActionText: '',
+    notes: '',
+    operator: '',
+    gestor: '',
+  };
+}
+
+function formatCurrency(n: number): string {
+  return new Intl.NumberFormat('es-EC', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(n) ? n : 0);
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isOverdue(date: string) {
+  return !!date && date < todayISO();
+}
+
+function buildWhatsappMessage(row: CobranzaRow) {
+  const nombre = row.nombre || 'estimado cliente';
+
+  if (row.diasMora >= 180) {
+    return `Hola ${nombre}, le escribimos para dar seguimiento a una obligación vencida de atención prioritaria. Podemos revisar alternativas de regularización.`;
+  }
+
+  if (row.diasMora >= 90) {
+    return `Hola ${nombre}, le saludamos para revisar una obligación vencida pendiente. Estamos disponibles para ayudarle a encontrar una solución ordenada.`;
+  }
+
+  return `Hola ${nombre}, le escribimos para dar seguimiento a su caso y coordinar una alternativa sobre su obligación vencida.`;
+}
+
+export default function Page() {
+  const [activeTab, setActiveTab] = useState<TabType>('Cobranzas');
+  const [rows, setRows] = useState<CobranzaRow[]>([]);
+  useEffect(() => {
+  const load = async () => {
+    try {
+      const data = await fetchLeads();
+      setRows(data as any);
+    } catch (err) {
+      console.error('Error cargando leads:', err);
+    }
+  };
+
+  load();
+}, []);
+  const [filter, setFilter] = useState<BlockFilter>('Todos');
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [search, setSearch] = useState('');
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [massLoading, setMassLoading] = useState(false);
+  const [showAssignPanel, setShowAssignPanel] = useState(false);
+  const [assignOperator, setAssignOperator] = useState(TEAM[0].operator);
+  const [assignGestor, setAssignGestor] = useState(TEAM[0].gestor);
+  const [assignScope, setAssignScope] = useState<AssignScope>('visible');
+  const [assignBlock, setAssignBlock] = useState<BlockFilter>('Crítico');
+  const [assignMessage, setAssignMessage] = useState('');
 
   useEffect(() => {
-    fetchLeads().then(setLeads);
+    try {
+      const savedRows = localStorage.getItem(STORAGE_KEY);
+      const savedSelected = localStorage.getItem(SELECTED_STORAGE_KEY);
+      const savedTab = localStorage.getItem(ACTIVE_TAB_KEY) as TabType | null;
+
+      if (savedRows) setRows(JSON.parse(savedRows));
+      if (savedSelected) setSelected(JSON.parse(savedSelected));
+      if (savedTab === 'Cobranzas' || savedTab === 'Jurídico') setActiveTab(savedTab);
+    } catch {}
   }, []);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+    } catch {}
+  }, [rows]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SELECTED_STORAGE_KEY, JSON.stringify(selected));
+    } catch {}
+  }, [selected]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+    } catch {}
+  }, [activeTab]);
+
+  useEffect(() => {
+    const found = TEAM.find((p) => p.operator === assignOperator);
+    if (found) setAssignGestor(found.gestor);
+  }, [assignOperator]);
+
+  const activeRow = useMemo(() => rows.find((r) => r.id === activeId) || null, [rows, activeId]);
+
+  const counts = useMemo(() => {
+    const base: Record<BlockFilter, number> = {
+      Todos: rows.length,
+      Crítico: 0,
+      'Muy urgente': 0,
+      Urgente: 0,
+      Prioritario: 0,
+      Normal: 0,
+    };
+
+    rows.forEach((r) => {
+      base[r.bloque] += 1;
+    });
+
+    return base;
+  }, [rows]);
+
+  const visibleRows = useMemo(() => {
+    let list = activeTab === 'Jurídico' ? rows.filter((r) => !!r.NumeroJuicio) : rows;
+
+    if (filter !== 'Todos' && activeTab === 'Cobranzas') {
+      list = list.filter((r) => r.bloque === filter);
+    }
+
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+
+    return list.filter((r) => {
+      return (
+        r.nombre.toLowerCase().includes(q) ||
+        r.identificacion.toLowerCase().includes(q) ||
+        r.telefono.toLowerCase().includes(q) ||
+        r.ciudad.toLowerCase().includes(q) ||
+        r.parroquia.toLowerCase().includes(q) ||
+        r.NumeroJuicio.toLowerCase().includes(q)
+      );
+    });
+  }, [rows, filter, search, activeTab]);
+
+  const selectedIds = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
+
+  const juridicoCount = useMemo(() => rows.filter((r) => !!r.NumeroJuicio).length, [rows]);
+
+  function getAssignTargetIds(): string[] {
+    if (assignScope === 'selected') return selectedIds || [];
+
+    if (assignScope === 'visible') {
+      return selectedIds.length ? selectedIds : visibleRows.map((r) => r.id);
+    }
+
+    if (assignScope === 'block') {
+      return rows.filter((r) => r.bloque === assignBlock).map((r) => r.id);
+    }
+
+    return rows.filter((r) => !!r.NumeroJuicio).map((r) => r.id);
+  }
+
+  const assignTargetCount = getAssignTargetIds().length;
+
+  function clearAssignmentBatch() {
+    const targetIds = new Set(getAssignTargetIds());
+
+    setRows((prev) =>
+      prev.map((row) =>
+        targetIds.has(row.id)
+          ? {
+              ...row,
+              seguimiento: {
+                ...row.seguimiento,
+                operator: '',
+                gestor: '',
+              },
+            }
+          : row
+      )
+    );
+
+    setAssignMessage(`Se quitó la asignación de ${targetIds.size} registros.`);
+  }
+
+  async function handleFile(file: File) {
+    const buffer = await file.arrayBuffer();
+    const wb = XLSX.read(buffer);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const json: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, {
+      defval: '',
+      raw: false,
+    });
+
+    const imported: CobranzaRow[] = json.map((r, i) => {
+      const ciudad = safeString(
+        getField(r, ['Ciudad', 'Canton', 'Cantón', 'CiudadDeudor', 'cr_ciudad'])
+      );
+      const provincia = safeString(getField(r, ['Provincia', 'ProvinciaDeudor', 'cr_provincia']));
+      const phone = getBestPhone(r);
+
+      const nombre =
+        safeString(
+          getField(r, [
+            'cr_nombre',
+            'NombreDeudor',
+            'Nombre',
+            'Nombres',
+            'Cliente',
+            'RazonSocial',
+            'RazónSocial',
+            'Deudor',
+          ])
+        ) || 'Cliente sin nombre';
+
+      const identificacion = safeString(
+        getField(r, [
+          'cr_identificacion',
+          'Cedula',
+          'Cédula',
+          'Identificacion',
+          'Identificación',
+          'Documento',
+        ])
+      );
+
+      const diasMora = parseIntSafe(
+        getField(r, [
+          'DiasMora',
+          'DíasMora',
+          'Dias Mora',
+          'dias_mora',
+          'DiasAtraso',
+          'DíasAtraso',
+          'cr_dias_mora',
+        ])
+      );
+
+      const montoBase = parseMoney(
+        getField(r, ['Monto', 'MontoDeuda', 'ValorVencido', 'Obligacion', 'Obligación', 'cr_monto'])
+      );
+
+      const totalVencido = parseMoney(
+        getField(r, ['TotalVencido', 'Total Vencido', 'Saldo', 'ValorVencido', 'cr_total_vencido'])
+      );
+
+      const monto = montoBase || totalVencido;
+
+      const historial: HistoryItem[] = [
+        {
+          id: uid(),
+          date: new Date().toLocaleString(),
+          type: 'import',
+          text: `Cliente importado. Nombre leído desde cr_nombre. Teléfono tomado desde ${phone.source || 'sin fuente'}.`,
+        },
+      ];
+
+      return {
+        id: `${Date.now()}_${i}`,
+        nombre,
+        identificacion,
+        telefono: phone.numero,
+        telefonoOriginal: phone.original,
+        telefonoTipo: phone.tipo,
+        telefonoWhatsapp: phone.whatsapp,
+        telefonoLlamada: phone.llamada,
+        whatsappStatus:
+          phone.tipo === 'celular'
+            ? 'Sin enviar'
+            : phone.tipo === 'fijo'
+            ? 'Solo fijo'
+            : 'Número inválido',
+        callStatus: phone.tipo === 'invalido' ? 'Número inválido' : 'Sin llamar',
+        diasMora,
+        monto,
+        bloque: calcularBloque(diasMora, monto),
+        NumeroJuicio: safeString(
+          getField(r, ['NumeroJuicio', 'NúmeroJuicio', 'Juicio', 'NroJuicio'])
+        ),
+        direccion: safeString(
+          getField(r, ['Direccion', 'Dirección', 'DireccionDeudor', 'cr_direccion'])
+        ),
+        parroquia: safeString(getField(r, ['Parroquia', 'cr_parroquia'])),
+        ciudad,
+        provincia,
+        sector: safeString(getField(r, ['Sector', 'Barrio', 'cr_sector'])),
+        tipoOperacion: safeString(
+          getField(r, ['TipoOperacion', 'Tipo Operacion', 'Tipo Crédito', 'cr_tipo_operacion'])
+        ),
+        totalVencido,
+        garantia: safeString(getField(r, ['Garantia', 'Garantía', 'cr_garantia'])),
+        seguimiento: defaultTracking(),
+        historial,
+        raw: r,
+      };
+    });
+
+    setRows(imported);
+    setSelected({});
+    setActiveId(imported[0]?.id || null);
+    setAssignMessage('');
+    setFilter('Todos');
+  }
+
+  function updateRow(id: string, updater: (row: CobranzaRow) => CobranzaRow) {
+    setRows((prev) => prev.map((r) => (r.id === id ? updater(r) : r)));
+  }
+
+  function addHistory(id: string, item: Omit<HistoryItem, 'id' | 'date'>) {
+    updateRow(id, (row) => ({
+      ...row,
+      historial: [
+        {
+          id: uid(),
+          date: new Date().toLocaleString(),
+          type: item.type,
+          text: item.text,
+        },
+        ...(row.historial || []),
+      ],
+    }));
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function toggleSelectVisible() {
+    const ids = visibleRows.map((r) => r.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selected[id]);
+
+    setSelected((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => {
+        next[id] = !allSelected;
+      });
+      return next;
+    });
+  }
+
+  function sendWhatsappToIds(ids: string[]) {
+    if (!ids.length) return;
+    setMassLoading(true);
+
+    ids.forEach((id, index) => {
+      setTimeout(() => {
+        updateRow(id, (row) => {
+          if (row.telefonoTipo !== 'celular' || !row.telefonoWhatsapp) {
+            return {
+              ...row,
+              whatsappStatus: row.telefonoTipo === 'fijo' ? 'Solo fijo' : 'Número inválido',
+            };
+          }
+
+          const random = Math.random();
+          let status: WhatsAppStatus = 'Enviado';
+          if (random > 0.85) status = 'Respondió';
+          else if (random > 0.6) status = 'Entregado';
+          else if (random < 0.15) status = 'Sin respuesta';
+
+          return {
+            ...row,
+            whatsappStatus: status,
+            historial: [
+              {
+                id: uid(),
+                date: new Date().toLocaleString(),
+                type: 'whatsapp',
+                text: `WhatsApp IA enviado a ${row.telefonoWhatsapp}. Resultado simulado: ${status}. Mensaje: "${buildWhatsappMessage(row)}"`,
+              },
+              ...(row.historial || []),
+            ],
+          };
+        });
+
+        if (index === ids.length - 1) {
+          setTimeout(() => setMassLoading(false), 250);
+        }
+      }, index * 120);
+    });
+  }
+
+  function simulateCall(id: string) {
+    updateRow(id, (row) => ({
+      ...row,
+      callStatus:
+        row.telefonoLlamada && row.telefonoTipo !== 'invalido' ? 'Llamando' : 'Número inválido',
+    }));
+
+    setTimeout(() => {
+      updateRow(id, (row) => {
+        if (row.telefonoTipo === 'invalido' || !row.telefonoLlamada) {
+          return { ...row, callStatus: 'Número inválido' };
+        }
+
+        const result: CallStatus = Math.random() > 0.45 ? 'Contestó' : 'No contestó';
+
+        let nextStatus = row.seguimiento.status;
+        let nextActionDate = row.seguimiento.nextActionDate;
+        let nextActionText = row.seguimiento.nextActionText;
+
+        if (result === 'Contestó') {
+          nextStatus = 'Contactado';
+          if (!nextActionDate) {
+            const d = new Date();
+            d.setDate(d.getDate() + 2);
+            nextActionDate = d.toISOString().slice(0, 10);
+          }
+          if (!nextActionText) nextActionText = 'Seguimiento post llamada';
+        }
+
+        return {
+          ...row,
+          callStatus: result,
+          seguimiento: {
+            ...row.seguimiento,
+            status: nextStatus,
+            nextActionDate,
+            nextActionText,
+          },
+          historial: [
+            {
+              id: uid(),
+              date: new Date().toLocaleString(),
+              type: 'call',
+              text: `Llamada simulada a ${row.telefonoLlamada}. Resultado: ${result}.`,
+            },
+            ...(row.historial || []),
+          ],
+        };
+      });
+    }, 1200);
+  }
+
+  function assignPortfolioAutomatic() {
+    if (!rows.length) return;
+
+    setRows((prev) =>
+      prev.map((row, index) => {
+        const person = TEAM[index % TEAM.length];
+        return {
+          ...row,
+          seguimiento: {
+            ...row.seguimiento,
+            operator: person.operator,
+            gestor: person.gestor,
+          },
+          historial: [
+            {
+              id: uid(),
+              date: new Date().toLocaleString(),
+              type: 'assign',
+              text: `Cartera asignada automáticamente a ${person.operator} / ${person.gestor}.`,
+            },
+            ...(row.historial || []),
+          ],
+        };
+      })
+    );
+
+    setAssignMessage(`Asignación automática completada para ${rows.length} registros.`);
+  }
+
+  function assignBatch() {
+    const targetIds = new Set(getAssignTargetIds());
+
+    if (!targetIds.size) {
+      setAssignMessage('No hay registros para asignar con ese criterio.');
+      return;
+    }
+
+    setRows((prev) =>
+      prev.map((row) => {
+        if (!targetIds.has(row.id)) return row;
+
+        return {
+          ...row,
+          seguimiento: {
+            ...row.seguimiento,
+            operator: assignOperator,
+            gestor: assignGestor,
+          },
+          historial: [
+            {
+              id: uid(),
+              date: new Date().toLocaleString(),
+              type: 'assign',
+              text: `Asignación por lote a ${assignOperator} / ${assignGestor}`,
+            },
+            ...(row.historial || []),
+          ],
+        };
+      })
+    );
+
+    setAssignMessage(
+      `Se asignaron ${targetIds.size} registros a ${assignOperator} / ${assignGestor}`
+    );
+
+    setShowAssignPanel(false);
+  }
+
+  function startOmnichannelCalls() {
+    const targetIds = visibleRows.slice(0, 12).map((r) => r.id);
+    targetIds.forEach((id, idx) => {
+      setTimeout(() => simulateCall(id), idx * 250);
+    });
+  }
+
+  function clearDemo() {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(SELECTED_STORAGE_KEY);
+    localStorage.removeItem(ACTIVE_TAB_KEY);
+    setRows([]);
+    setSelected({});
+    setActiveId(null);
+    setSearch('');
+    setFilter('Todos');
+    setActiveTab('Cobranzas');
+    setShowAssignPanel(false);
+    setAssignMessage('');
+  }
+
+  const selectedCount = selectedIds.length;
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '320px 1fr',
+        gap: 0,
+        height: 'calc(100vh - 64px)',
+        minHeight: 700,
+        background: 'linear-gradient(180deg, #eef4fb 0%, #f7faff 100%)',
+      }}
+    >
+      <aside
+        style={{
+          padding: 14,
+          borderRight: '1px solid rgba(255,255,255,0.08)',
+          background: 'linear-gradient(180deg, #071225 0%, #0d1a33 55%, #12213f 100%)',
+          overflow: 'auto',
+          color: '#fff',
+          boxShadow: 'inset -1px 0 0 rgba(255,255,255,0.04)',
+        }}
+      >
+        <div
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 18,
+            padding: 14,
+            marginBottom: 14,
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <img
+              src="/discovery-logo-circle.png"
+              alt="Discovery Innova"
+              style={{
+                width: 46,
+                height: 46,
+                objectFit: 'contain',
+                borderRadius: 999,
+                background: 'rgba(255,255,255,0.06)',
+                padding: 4,
+              }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 0.2 }}>Discovery CRM</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.72)' }}>
+                Ventas + Cobranzas + Jurídico
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 14,
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 14,
+              padding: 10,
+            }}
+          >
+            <img
+              src="/discovery-logo-full.png"
+              alt="Discovery full"
+              style={{ width: '100%', height: 42, objectFit: 'contain', display: 'block' }}
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
+          <button
+            onClick={() => setActiveTab('Cobranzas')}
+            style={{
+              ...darkTabBtn,
+              background:
+                activeTab === 'Cobranzas'
+                  ? 'linear-gradient(135deg, #ffffff 0%, #dbeafe 100%)'
+                  : 'rgba(255,255,255,0.05)',
+              color: activeTab === 'Cobranzas' ? '#0f172a' : '#ffffff',
+              border:
+                activeTab === 'Cobranzas'
+                  ? '1px solid rgba(255,255,255,0.4)'
+                  : '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            Cobranzas
+          </button>
+          <button
+            onClick={() => setActiveTab('Jurídico')}
+            style={{
+              ...darkTabBtn,
+              background:
+                activeTab === 'Jurídico'
+                  ? 'linear-gradient(135deg, #ffffff 0%, #fce7f3 100%)'
+                  : 'rgba(255,255,255,0.05)',
+              color: activeTab === 'Jurídico' ? '#0f172a' : '#ffffff',
+              border:
+                activeTab === 'Jurídico'
+                  ? '1px solid rgba(255,255,255,0.4)'
+                  : '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            Jurídico
+          </button>
+        </div>
+
+        <PanelCardDark title="CRM Cobranzas">
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)', marginBottom: 12, lineHeight: 1.35 }}>
+            Importación real de Excel, WhatsApp IA simulado, seguimiento, alertas y base escalable
+            para central telefónica y jurídico.
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+            <label style={{ ...primaryBtn, textAlign: 'center', cursor: 'pointer' }}>
+              Cargar Excel
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFile(file);
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+
+            <button
+              onClick={clearDemo}
+              style={{
+                ...lightGhostBtn,
+                padding: '10px 12px',
+              }}
+            >
+              Limpiar demo
+            </button>
+          </div>
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por cliente, teléfono, ciudad, juicio"
+            style={searchInputDark}
+          />
+        </PanelCardDark>
+
+        {activeTab === 'Cobranzas' && (
+          <>
+            <PanelCardDark title="Bloques de prioridad">
+              {(['Todos', 'Crítico', 'Muy urgente', 'Urgente', 'Prioritario', 'Normal'] as BlockFilter[]).map(
+                (item) => {
+                  const active = filter === item;
+                  return (
+                    <button
+                      key={item}
+                      onClick={() => setFilter(item)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        textAlign: 'left',
+                        borderRadius: 12,
+                        border: active
+                          ? '1px solid rgba(255,255,255,0.28)'
+                          : '1px solid rgba(255,255,255,0.08)',
+                        background: active ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
+                        color: colorForBlock(item),
+                        fontWeight: 800,
+                        fontSize: 12,
+                        marginBottom: 8,
+                        cursor: 'pointer',
+                        backdropFilter: 'blur(6px)',
+                      }}
+                    >
+                      {item} ({counts[item]})
+                    </button>
+                  );
+                }
+              )}
+            </PanelCardDark>
+
+            <PanelCardDark title="WhatsApp masivo IA">
+              <button
+                onClick={() => sendWhatsappToIds(selectedIds)}
+                style={{ ...secondaryDarkBtn, marginBottom: 8 }}
+              >
+                WhatsApp seleccionados IA ({selectedCount})
+              </button>
+              <button
+                onClick={() => sendWhatsappToIds(visibleRows.map((r) => r.id))}
+                style={secondaryDarkBtn}
+              >
+                WhatsApp filtro actual IA ({visibleRows.length})
+              </button>
+              {massLoading && (
+                <div style={{ fontSize: 12, color: '#fde68a', marginTop: 8 }}>
+                  Procesando envío IA...
+                </div>
+              )}
+            </PanelCardDark>
+
+            <PanelCardDark title="Central telefónica simulada">
+              <button
+                onClick={() => setShowAssignPanel(!showAssignPanel)}
+                style={{ ...secondaryDarkBtn, marginBottom: 8 }}
+              >
+                Asignación por lotes
+              </button>
+
+              {showAssignPanel && (
+                <div
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 14,
+                    background: 'rgba(255,255,255,0.05)',
+                    padding: 10,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 10, color: '#ffffff' }}>
+                    Asignador manual por lotes
+                  </div>
+
+                  <FieldLabelDark label="Operador">
+                    <select
+                      style={inputStyleDark}
+                      value={assignOperator}
+                      onChange={(e) => setAssignOperator(e.target.value)}
+                    >
+                      {TEAM.map((p) => (
+                        <option key={p.operator} value={p.operator}>
+                          {p.operator}
+                        </option>
+                      ))}
+                    </select>
+                  </FieldLabelDark>
+
+                  <div style={{ height: 8 }} />
+
+                  <FieldLabelDark label="Gestor">
+                    <select
+                      style={inputStyleDark}
+                      value={assignGestor}
+                      onChange={(e) => setAssignGestor(e.target.value)}
+                    >
+                      {TEAM.map((p) => (
+                        <option key={p.gestor} value={p.gestor}>
+                          {p.gestor}
+                        </option>
+                      ))}
+                    </select>
+                  </FieldLabelDark>
+
+                  <div style={{ height: 8 }} />
+
+                  <FieldLabelDark label="Aplicar a">
+                    <select
+                      style={inputStyleDark}
+                      value={assignScope}
+                      onChange={(e) => setAssignScope(e.target.value as AssignScope)}
+                    >
+                      <option value="selected">Seleccionados ({selectedCount})</option>
+                      <option value="visible">Visibles del filtro actual ({visibleRows.length})</option>
+                      <option value="block">Por bloque</option>
+                      <option value="juridico">Solo jurídicos con juicio ({juridicoCount})</option>
+                    </select>
+                  </FieldLabelDark>
+
+                  {assignScope === 'block' && (
+                    <>
+                      <div style={{ height: 8 }} />
+                      <FieldLabelDark label="Bloque">
+                        <select
+                          style={inputStyleDark}
+                          value={assignBlock}
+                          onChange={(e) => setAssignBlock(e.target.value as BlockFilter)}
+                        >
+                          <option value="Crítico">Crítico ({counts['Crítico']})</option>
+                          <option value="Muy urgente">Muy urgente ({counts['Muy urgente']})</option>
+                          <option value="Urgente">Urgente ({counts['Urgente']})</option>
+                          <option value="Prioritario">Prioritario ({counts['Prioritario']})</option>
+                          <option value="Normal">Normal ({counts['Normal']})</option>
+                        </select>
+                      </FieldLabelDark>
+                    </>
+                  )}
+
+                  <div
+                    style={{
+                      marginTop: 10,
+                      marginBottom: 10,
+                      fontSize: 11,
+                      color: 'rgba(255,255,255,0.65)',
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    Registros objetivo: <b style={{ color: '#fff' }}>{assignTargetCount}</b>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <button onClick={assignBatch} style={{ ...lightGhostBtn, width: '100%' }}>
+                      Aplicar asignación manual por lote
+                    </button>
+
+                    <button
+                      style={{
+                        ...lightGhostBtn,
+                        width: '100%',
+                        marginTop: 8,
+                        background: 'rgba(244,63,94,0.14)',
+                        border: '1px solid rgba(244,63,94,0.24)',
+                        color: '#fecdd3',
+                      }}
+                      onClick={clearAssignmentBatch}
+                    >
+                      Quitar asignación manual por lote
+                    </button>
+
+                    <button
+                      onClick={assignPortfolioAutomatic}
+                      style={{ ...lightGhostBtn, width: '100%' }}
+                    >
+                      Asignación automática equilibrada
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {assignMessage && (
+                <div
+                  style={{
+                    background: 'rgba(59,130,246,0.12)',
+                    color: '#bfdbfe',
+                    border: '1px solid rgba(59,130,246,0.24)',
+                    borderRadius: 10,
+                    padding: '8px 10px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    marginBottom: 8,
+                  }}
+                >
+                  {assignMessage}
+                </div>
+              )}
+
+              <button onClick={startOmnichannelCalls} style={secondaryDarkBtn}>
+                Iniciar llamadas simuladas omnicanal
+              </button>
+
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 8, lineHeight: 1.3 }}>
+                Cuando el cliente contesta, la simulación lo transfiere al operador asignado.
+              </div>
+
+              <div style={{ marginTop: 12, fontWeight: 800, fontSize: 13, color: '#fff' }}>
+                Equipo asignable
+              </div>
+              <div style={{ marginTop: 8 }}>
+                {TEAM.map((p) => (
+                  <div
+                    key={`${p.operator}_${p.gestor}`}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '8px 10px',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: 12,
+                      background: 'rgba(255,255,255,0.04)',
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 12, color: '#fff' }}>{p.operator}</div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)' }}>{p.gestor}</div>
+                    </div>
+                    <span
+                      style={{
+                        background: 'rgba(34,197,94,0.16)',
+                        color: '#bbf7d0',
+                        padding: '4px 8px',
+                        borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Activo
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </PanelCardDark>
+          </>
+        )}
+
+        {activeTab === 'Jurídico' && (
+          <PanelCardDark title="Módulo jurídico">
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)', lineHeight: 1.35 }}>
+              Vista separada de registros con <b>NumeroJuicio</b>, sin mezclar mal el flujo jurídico
+              con cobranza.
+            </div>
+            <div style={{ marginTop: 12, fontSize: 13, color: '#fff' }}>
+              Registros jurídicos: <b>{juridicoCount}</b>
+            </div>
+          </PanelCardDark>
+        )}
+      </aside>
+
+      <main
+        style={{
+          display: 'grid',
+          gridTemplateRows: '58px 1fr',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '12px 18px',
+            borderBottom: '1px solid #dce5f1',
+            background: 'rgba(255,255,255,0.7)',
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <button onClick={toggleSelectVisible} style={secondaryBtn}>
+              Seleccionar visibles
+            </button>
+            <span style={topBadge}>Filtro actual: {activeTab === 'Jurídico' ? 'Jurídico' : filter}</span>
+            <span style={topBadge}>Registros visibles: {visibleRows.length}</span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontWeight: 800,
+              color: '#0f172a',
+            }}
+          >
+            <img
+              src="/discovery-logo-circle.png"
+              alt="Discovery mini"
+              style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 999 }}
+            />
+            <span style={{ fontSize: 12 }}>Demo SaaS</span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: activeRow ? '1fr 430px' : '1fr',
+            minHeight: 0,
+            height: '100%',
+          }}
+        >
+          <div
+            style={{
+              overflow: 'auto',
+              padding: 14,
+            }}
+          >
+            <div
+              style={{
+                background: 'rgba(255,255,255,0.88)',
+                border: '1px solid #d7dfec',
+                borderRadius: 18,
+                overflow: 'hidden',
+                boxShadow: '0 16px 40px rgba(15,23,42,0.08)',
+              }}
+            >
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  minWidth: 1500,
+                }}
+              >
+                <thead>
+                  <tr style={{ background: '#0b1630', color: '#fff' }}>
+                    {[
+                      '',
+                      'Cliente',
+                      'Teléfono',
+                      'Ciudad',
+                      'Parroquia',
+                      'Días mora',
+                      'Obligación vencida',
+                      'Garantía',
+                      'Juicio',
+                      'Bloque',
+                      'WhatsApp',
+                      'Llamada',
+                      'Promesa',
+                      'Próxima acción',
+                      'Operador',
+                      'Gestor',
+                    ].map((h) => (
+                      <th
+                        key={h || 'blank_header'}
+                        style={{
+                          padding: '10px 10px',
+                          fontSize: 11,
+                          textAlign: 'left',
+                          whiteSpace: 'nowrap',
+                          position: 'sticky',
+                          top: 0,
+                          background: '#0b1630',
+                          zIndex: 2,
+                          letterSpacing: 0.2,
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {visibleRows.map((row) => {
+                    const isActive = activeId === row.id;
+                    return (
+                      <tr
+                        key={row.id}
+                        onClick={() => setActiveId(row.id)}
+                        style={{
+                          background: isActive
+                            ? 'linear-gradient(90deg, rgba(59,130,246,0.14), rgba(59,130,246,0.05))'
+                            : '#ffffff',
+                          cursor: 'pointer',
+                          borderBottom: '1px solid #edf2f7',
+                          boxShadow: isActive ? 'inset 4px 0 0 #3b82f6' : 'none',
+                          transition: 'all 0.18s ease',
+                        }}
+                      >
+                        <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={!!selected[row.id]}
+                            onChange={() => toggleSelect(row.id)}
+                          />
+                        </td>
+
+                        <td style={tdStyle}>
+                          <div style={{ fontWeight: 800, color: '#111827' }}>{row.nombre}</div>
+                          <div style={{ fontSize: 11, color: '#6b7280' }}>{row.identificacion || '—'}</div>
+                        </td>
+
+                        <td style={tdStyle}>{row.telefono || '—'}</td>
+                        <td style={tdStyle}>{row.ciudad || '—'}</td>
+                        <td style={tdStyle}>{row.parroquia || '—'}</td>
+                        <td style={tdStyle}>{row.diasMora}</td>
+                        <td style={tdStyle}>{formatCurrency(row.monto || row.totalVencido)}</td>
+                        <td style={tdStyle}>{row.garantia || '—'}</td>
+                        <td style={tdStyle}>{row.NumeroJuicio || '—'}</td>
+                        <td style={tdStyle}>
+                          <span style={pillStyle(row.bloque)}>{row.bloque}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={softPill}>{row.whatsappStatus}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={softPill}>{row.callStatus}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={softPill}>{row.seguimiento.promiseDate ? 'Sí' : '—'}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={softPill}>{row.seguimiento.nextActionDate ? 'Sí' : '—'}</span>
+                        </td>
+                        <td style={tdStyle}>{row.seguimiento.operator || '—'}</td>
+                        <td style={tdStyle}>{row.seguimiento.gestor || '—'}</td>
+                      </tr>
+                    );
+                  })}
+
+                  {!visibleRows.length && (
+                    <tr>
+                      <td colSpan={16} style={{ padding: 24, textAlign: 'center', color: '#6b7280' }}>
+                        No hay registros visibles.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {activeRow && (
+            <div
+              style={{
+                borderLeft: '1px solid #d7dfec',
+                background: 'linear-gradient(180deg, #f7fbff 0%, #eef5ff 100%)',
+                overflow: 'auto',
+                padding: 14,
+              }}
+            >
+              <div
+                style={{
+                  background: 'rgba(255,255,255,0.92)',
+                  border: '1px solid #d7dfec',
+                  borderRadius: 18,
+                  padding: 16,
+                  boxShadow: '0 16px 40px rgba(15,23,42,0.08)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    marginBottom: 14,
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <img
+                      src="/discovery-logo-circle.png"
+                      alt="Discovery perfil"
+                      style={{ width: 38, height: 38, objectFit: 'contain', borderRadius: 999 }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#111827', lineHeight: 1 }}>
+                        {activeRow.nombre}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                        {activeRow.identificacion || 'Sin identificación'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button onClick={() => setActiveId(null)} style={secondaryBtn}>
+                    Cerrar
+                  </button>
+                </div>
+
+                {isOverdue(activeRow.seguimiento.promiseDate) && (
+                  <div style={alertRed}>Promesa incumplida</div>
+                )}
+
+                {!isOverdue(activeRow.seguimiento.promiseDate) &&
+                  isOverdue(activeRow.seguimiento.nextActionDate) && (
+                    <div style={alertOrange}>Próxima acción vencida</div>
+                  )}
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 10,
+                    marginBottom: 14,
+                  }}
+                >
+                  <InfoCard title="WhatsApp" value={activeRow.whatsappStatus} />
+                  <InfoCard title="Llamada" value={activeRow.callStatus} />
+                  <InfoCard title="Días mora" value={String(activeRow.diasMora)} />
+                  <InfoCard title="Monto" value={formatCurrency(activeRow.monto || activeRow.totalVencido)} />
+                  <InfoCard title="Juicio" value={activeRow.NumeroJuicio || '—'} />
+                  <InfoCard title="Garantía" value={activeRow.garantia || '—'} />
+                </div>
+
+                <SectionTitle>Datos del cliente</SectionTitle>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr',
+                    gap: 10,
+                    marginBottom: 14,
+                  }}
+                >
+                  <ReadOnlyField label="Dirección" value={activeRow.direccion} />
+                  <ReadOnlyField label="Parroquia" value={activeRow.parroquia} />
+                  <ReadOnlyField label="Ciudad" value={activeRow.ciudad} />
+                  <ReadOnlyField label="Provincia" value={activeRow.provincia} />
+                  <ReadOnlyField label="Sector" value={activeRow.sector} />
+                  <ReadOnlyField label="Tipo operación" value={activeRow.tipoOperacion} />
+                </div>
+
+                <SectionTitle>Seguimiento</SectionTitle>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr',
+                    gap: 10,
+                    marginBottom: 10,
+                  }}
+                >
+                  <FieldLabel label="Estado">
+                    <select
+                      style={inputStyle}
+                      value={activeRow.seguimiento.status}
+                      onChange={(e) => {
+                        const value = e.target.value as PipelineStatus;
+                        updateRow(activeRow.id, (row) => ({
+                          ...row,
+                          seguimiento: { ...row.seguimiento, status: value },
+                        }));
+                        addHistory(activeRow.id, {
+                          type: 'status',
+                          text: `Estado actualizado a "${value}".`,
+                        });
+                      }}
+                    >
+                      <option>Sin gestionar</option>
+                      <option>Contactado</option>
+                      <option>En proceso</option>
+                      <option>Incumplido</option>
+                    </select>
+                  </FieldLabel>
+
+                  <FieldLabel label="Operador">
+                    <input
+                      style={inputStyle}
+                      value={activeRow.seguimiento.operator || ''}
+                      onChange={(e) =>
+                        updateRow(activeRow.id, (row) => ({
+                          ...row,
+                          seguimiento: {
+                            ...row.seguimiento,
+                            operator: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder="Operador"
+                    />
+                  </FieldLabel>
+
+                  <FieldLabel label="Gestor">
+                    <input
+                      style={inputStyle}
+                      value={activeRow.seguimiento.gestor}
+                      onChange={(e) =>
+                        updateRow(activeRow.id, (row) => ({
+                          ...row,
+                          seguimiento: { ...row.seguimiento, gestor: e.target.value },
+                        }))
+                      }
+                      placeholder="Gestor"
+                    />
+                  </FieldLabel>
+
+                  <FieldLabel label="Fecha promesa">
+                    <input
+                      type="date"
+                      style={inputStyle}
+                      value={activeRow.seguimiento.promiseDate}
+                      onChange={(e) =>
+                        updateRow(activeRow.id, (row) => ({
+                          ...row,
+                          seguimiento: { ...row.seguimiento, promiseDate: e.target.value },
+                        }))
+                      }
+                    />
+                  </FieldLabel>
+
+                  <FieldLabel label="Monto promesa">
+                    <input
+                      style={inputStyle}
+                      value={activeRow.seguimiento.promiseAmount}
+                      onChange={(e) =>
+                        updateRow(activeRow.id, (row) => ({
+                          ...row,
+                          seguimiento: { ...row.seguimiento, promiseAmount: e.target.value },
+                        }))
+                      }
+                      placeholder="$0.00"
+                    />
+                  </FieldLabel>
+
+                  <FieldLabel label="Próxima acción">
+                    <input
+                      type="date"
+                      style={inputStyle}
+                      value={activeRow.seguimiento.nextActionDate}
+                      onChange={(e) =>
+                        updateRow(activeRow.id, (row) => ({
+                          ...row,
+                          seguimiento: { ...row.seguimiento, nextActionDate: e.target.value },
+                        }))
+                      }
+                    />
+                  </FieldLabel>
+
+                  <FieldLabel label="Detalle próxima acción">
+                    <input
+                      style={inputStyle}
+                      value={activeRow.seguimiento.nextActionText}
+                      onChange={(e) =>
+                        updateRow(activeRow.id, (row) => ({
+                          ...row,
+                          seguimiento: { ...row.seguimiento, nextActionText: e.target.value },
+                        }))
+                      }
+                      placeholder="Llamar / visitar / revisar / acordar"
+                    />
+                  </FieldLabel>
+                </div>
+
+                <FieldLabel label="Notas">
+                  <textarea
+                    style={{ ...inputStyle, minHeight: 90, resize: 'vertical' }}
+                    value={activeRow.seguimiento.notes}
+                    onChange={(e) =>
+                      updateRow(activeRow.id, (row) => ({
+                        ...row,
+                        seguimiento: { ...row.seguimiento, notes: e.target.value },
+                      }))
+                    }
+                    placeholder="Observaciones"
+                  />
+                </FieldLabel>
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                  <button
+                    style={secondaryBtn}
+                    onClick={() => {
+                      addHistory(activeRow.id, {
+                        type: 'promise',
+                        text: `Promesa guardada${activeRow.seguimiento.promiseDate ? ` para ${activeRow.seguimiento.promiseDate}` : ''}${activeRow.seguimiento.promiseAmount ? ` por ${activeRow.seguimiento.promiseAmount}` : ''}.`,
+                      });
+                    }}
+                  >
+                    Guardar promesa
+                  </button>
+
+                  <button
+                    style={secondaryBtn}
+                    onClick={() => {
+                      addHistory(activeRow.id, {
+                        type: 'action',
+                        text: `Próxima acción registrada: ${activeRow.seguimiento.nextActionText || 'sin detalle'}${activeRow.seguimiento.nextActionDate ? ` (${activeRow.seguimiento.nextActionDate})` : ''}.`,
+                      });
+                    }}
+                  >
+                    Guardar próxima acción
+                  </button>
+
+                  <button style={secondaryBtn} onClick={() => sendWhatsappToIds([activeRow.id])}>
+                    WhatsApp IA
+                  </button>
+
+                  <button style={secondaryBtn} onClick={() => simulateCall(activeRow.id)}>
+                    Llamada simulada
+                  </button>
+                </div>
+
+                <SectionTitle>Historial</SectionTitle>
+                <div
+                  style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 14,
+                    maxHeight: 240,
+                    overflow: 'auto',
+                    background: '#fff',
+                  }}
+                >
+                  {(activeRow.historial || []).length ? (
+                    activeRow.historial.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          padding: 12,
+                          borderBottom: '1px solid #eef2f7',
+                        }}
+                      >
+                        <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 800, marginBottom: 4 }}>
+                          {item.type} · {item.date}
+                        </div>
+                        <div style={{ fontSize: 14, color: '#111827' }}>{item.text}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ padding: 16, color: '#6b7280' }}>Sin historial todavía.</div>
+                  )}
+                </div>
+
+                <SectionTitle>Módulo jurídico</SectionTitle>
+                <div
+                  style={{
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 14,
+                    background: '#f9fafb',
+                    padding: 12,
+                  }}
+                >
+                  <div style={{ marginBottom: 6 }}>
+                    <b>Número de juicio:</b> {activeRow.NumeroJuicio || '—'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>
+                    Este bloque queda separado para seguimiento jurídico escalable.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function PanelCardDark({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 18,
+        padding: 14,
+        marginBottom: 12,
+        backdropFilter: 'blur(8px)',
+      }}
+    >
+      <div style={{ fontWeight: 900, color: '#ffffff', marginBottom: 10 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 15,
+        fontWeight: 900,
+        color: '#111827',
+        marginBottom: 10,
+        marginTop: 18,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function InfoCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div
+      style={{
+        border: '1px solid #e5e7eb',
+        background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+        borderRadius: 14,
+        padding: 12,
+        boxShadow: '0 6px 18px rgba(15,23,42,0.04)',
+      }}
+    >
+      <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 900, marginBottom: 4 }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 14, color: '#111827', fontWeight: 800 }}>{value || '—'}</div>
+    </div>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <h1 className="page-title">Ventas / Leads</h1>
-
-      {/* KPI */}
-      <div className="kpi-grid">
-        <div className="kpi-card">
-          <div className="kpi-label">Total Leads</div>
-          <div className="kpi-value">{leads.length}</div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-label">Nuevos</div>
-          <div className="kpi-value">
-            {leads.filter(l => l.status === 'new').length}
-          </div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-label">En gestión</div>
-          <div className="kpi-value">
-            {leads.filter(l => l.status === 'contacted').length}
-          </div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-label">Cierre</div>
-          <div className="kpi-value">
-            {leads.filter(l => l.status === 'closed').length}
-          </div>
-        </div>
+      <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 900, marginBottom: 4 }}>
+        {label}
       </div>
-
-      {/* PANEL */}
-      <div className="panel-grid">
-        <div className="panel">
-          <div className="panel-title">Actividad Comercial</div>
-          <p style={{ color: '#64748b' }}>
-            Aquí irá gráfico tipo Power BI (siguiente paso)
-          </p>
-        </div>
-
-        <div className="panel">
-          <div className="panel-title">Resumen</div>
-          <p style={{ color: '#64748b' }}>
-            Conversión, pipeline, performance
-          </p>
-        </div>
-      </div>
-
-      {/* TABLA */}
-      <div className="table-wrap">
-        <div className="panel-title">Lista de Leads</div>
-
-        <input className="search-input" placeholder="Buscar..." />
-
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Email</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {leads.map((lead) => (
-              <tr key={lead.id}>
-                <td>{lead.firstName} {lead.lastName}</td>
-                <td>{lead.email}</td>
-                <td>
-                  <span className="status-badge">
-                    {lead.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div
+        style={{
+          minHeight: 40,
+          border: '1px solid #e5e7eb',
+          background: '#fff',
+          borderRadius: 12,
+          padding: '10px 12px',
+          color: '#111827',
+          boxShadow: '0 4px 12px rgba(15,23,42,0.03)',
+        }}
+      >
+        {value || '—'}
       </div>
     </div>
   );
 }
+
+function FieldLabel({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label style={{ display: 'block' }}>
+      <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 900, marginBottom: 4 }}>
+        {label}
+      </div>
+      {children}
+    </label>
+  );
+}
+
+function FieldLabelDark({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label style={{ display: 'block' }}>
+      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.72)', fontWeight: 900, marginBottom: 4 }}>
+        {label}
+      </div>
+      {children}
+    </label>
+  );
+}
+
+function colorForBlock(block: BlockFilter) {
+  if (block === 'Crítico') return '#f87171';
+  if (block === 'Muy urgente') return '#fb923c';
+  if (block === 'Urgente') return '#fbbf24';
+  if (block === 'Prioritario') return '#60a5fa';
+  if (block === 'Normal') return '#4ade80';
+  return '#ffffff';
+}
+
+function pillStyle(block: BlockFilter): CSSProperties {
+  const map: Record<BlockFilter, { bg: string; color: string }> = {
+    Todos: { bg: '#e5e7eb', color: '#374151' },
+    Crítico: { bg: '#fee2e2', color: '#dc2626' },
+    'Muy urgente': { bg: '#ffedd5', color: '#ea580c' },
+    Urgente: { bg: '#fef3c7', color: '#d97706' },
+    Prioritario: { bg: '#dbeafe', color: '#2563eb' },
+    Normal: { bg: '#dcfce7', color: '#16a34a' },
+  };
+
+  return {
+    background: map[block]?.bg || '#eee',
+    color: map[block]?.color || '#333',
+    padding: '4px 8px',
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 900,
+    display: 'inline-block',
+    whiteSpace: 'nowrap',
+  };
+}
+
+const darkTabBtn: CSSProperties = {
+  borderRadius: 12,
+  padding: '10px 12px',
+  fontWeight: 900,
+  cursor: 'pointer',
+  backdropFilter: 'blur(6px)',
+};
+
+const primaryBtn: CSSProperties = {
+  background: 'linear-gradient(135deg, #ffffff 0%, #dbeafe 100%)',
+  color: '#0f172a',
+  border: '1px solid rgba(255,255,255,0.55)',
+  borderRadius: 12,
+  padding: '10px 12px',
+  fontWeight: 900,
+  cursor: 'pointer',
+  display: 'inline-block',
+};
+
+const lightGhostBtn: CSSProperties = {
+  background: 'rgba(255,255,255,0.07)',
+  color: '#ffffff',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 12,
+  padding: '9px 12px',
+  fontWeight: 800,
+  cursor: 'pointer',
+};
+
+const secondaryBtn: CSSProperties = {
+  background: '#ffffff',
+  color: '#334155',
+  border: '1px solid #d7dfec',
+  borderRadius: 12,
+  padding: '9px 12px',
+  fontWeight: 800,
+  cursor: 'pointer',
+  boxShadow: '0 4px 12px rgba(15,23,42,0.04)',
+};
+
+const secondaryDarkBtn: CSSProperties = {
+  width: '100%',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.06) 100%)',
+  color: '#fff',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 12,
+  padding: '10px 12px',
+  fontWeight: 900,
+  cursor: 'pointer',
+};
+
+const topBadge: CSSProperties = {
+  background: '#ffffff',
+  border: '1px solid #d7dfec',
+  color: '#475569',
+  borderRadius: 999,
+  padding: '7px 12px',
+  fontSize: 12,
+  fontWeight: 800,
+  boxShadow: '0 4px 12px rgba(15,23,42,0.04)',
+};
+
+const searchInputDark: CSSProperties = {
+  width: '100%',
+  marginTop: 10,
+  border: '1px solid rgba(255,255,255,0.10)',
+  borderRadius: 12,
+  padding: '10px 12px',
+  background: 'rgba(255,255,255,0.06)',
+  color: '#ffffff',
+  outline: 'none',
+};
+
+const inputStyleDark: CSSProperties = {
+  width: '100%',
+  border: '1px solid rgba(255,255,255,0.10)',
+  borderRadius: 12,
+  padding: '10px 12px',
+  background: 'rgba(255,255,255,0.06)',
+  color: '#ffffff',
+  outline: 'none',
+};
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  border: '1px solid #d1d5db',
+  borderRadius: 12,
+  padding: '10px 12px',
+  background: '#fff',
+  color: '#111827',
+  outline: 'none',
+};
+
+const tdStyle: CSSProperties = {
+  padding: '10px 10px',
+  fontSize: 12,
+  color: '#374151',
+  whiteSpace: 'nowrap',
+};
+
+const softPill: CSSProperties = {
+  background: '#f3f4f6',
+  color: '#4b5563',
+  padding: '4px 8px',
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 800,
+  display: 'inline-block',
+};
+
+const alertRed: CSSProperties = {
+  background: '#fee2e2',
+  color: '#991b1b',
+  border: '1px solid #fecaca',
+  borderRadius: 14,
+  padding: 12,
+  marginBottom: 12,
+  fontWeight: 900,
+};
+
+const alertOrange: CSSProperties = {
+  background: '#ffedd5',
+  color: '#9a3412',
+  border: '1px solid #fdba74',
+  borderRadius: 14,
+  padding: 12,
+  marginBottom: 12,
+  fontWeight: 900,
+};
