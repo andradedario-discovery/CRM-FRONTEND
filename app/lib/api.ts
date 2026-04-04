@@ -1,88 +1,107 @@
-import { getToken, removeToken } from '@/app/lib/auth';
+import { getToken, saveToken, removeToken } from './auth';
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
-const USE_DEMO = !process.env.NEXT_PUBLIC_API_URL;
-
-export type Lead = {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email?: string;
-  phone?: string;
-  company?: string;
-  source?: string;
-  status?: string;
-  createdAt?: string;
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://crm-backend-hzth.onrender.com';
+type RequestOptions = RequestInit & {
+  auth?: boolean;
 };
 
-const demoLeads: Lead[] = [
-  {
-    id: '1',
-    firstName: 'Carlos',
-    lastName: 'Ruiz',
-    email: 'carlos@test.com',
-    phone: '0993333333',
-    company: 'Empresa Tres',
-    source: 'referido',
-    status: 'new',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    firstName: 'Maria',
-    lastName: 'Lopez',
-    email: 'maria@test.com',
-    phone: '0982222222',
-    company: 'Empresa Dos',
-    source: 'whatsapp',
-    status: 'new',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    firstName: 'Juan',
-    lastName: 'Perez',
-    email: 'juan@test.com',
-    phone: '0999999999',
-    company: 'Empresa Uno',
-    source: 'web',
-    status: 'new',
-    createdAt: new Date().toISOString(),
-  },
-];
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const headers = new Headers(options.headers || {});
 
-export async function fetchLeads(): Promise<Lead[]> {
-  const token = getToken();
-
-  // 🔥 MODO DEMO (Vercel)
-  if (USE_DEMO) {
-    console.log('🚀 DEMO MODE ACTIVATED');
-    return new Promise((resolve) =>
-      setTimeout(() => resolve(demoLeads), 800)
-    );
+  if (options.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
 
-  if (!token) {
-    return [];
+  if (options.auth) {
+    const token = getToken();
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
   }
 
-  const response = await fetch(`${API_URL}/leads`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers,
   });
 
-  if (response.status === 401) {
-    removeToken();
-    return [];
-  }
-
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || 'Error en la petición');
+    let message = 'Error en la solicitud';
+
+    try {
+      const errorData = await response.json();
+      if (Array.isArray(errorData.message)) {
+        message = errorData.message.join(', ');
+      } else if (typeof errorData.message === 'string') {
+        message = errorData.message;
+      }
+    } catch {
+      // sin cuerpo JSON
+    }
+
+    throw new Error(message);
   }
 
   return response.json();
 }
+
+export type LoginResponse = {
+  access_token: string;
+  user?: {
+    id: string;
+    email: string;
+    role?: string;
+    firstName?: string;
+    lastName?: string;
+  };
+};
+
+export type ProfileResponse = {
+  id: string;
+  email: string;
+  role?: string;
+  firstName?: string;
+  lastName?: string;
+};
+
+export type Lead = {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  status?: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export async function login(email: string, password: string) {
+  const data = await request<LoginResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+
+  saveToken(data.access_token);
+  return data;
+}
+
+export async function fetchProfile() {
+  return request<ProfileResponse>('/auth/profile', {
+    method: 'GET',
+    auth: true,
+  });
+}
+
+export async function fetchLeads() {
+  return request<Lead[]>('/leads', {
+    method: 'GET',
+    auth: true,
+  });
+}
+
+export function logout() {
+  removeToken();
+}
+
+export { API_URL };

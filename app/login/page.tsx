@@ -1,129 +1,189 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { fetchLeads } from '@/app/lib/api';
-import { getToken, removeToken } from '@/app/lib/auth';
+import { login } from '../lib/api';
 
-type Lead = {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  status: string;
-};
-
-export default function LeadsPage() {
+export default function LoginPage() {
   const router = useRouter();
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('admin@crm.com');
+  const [password, setPassword] = useState('123456');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    const token = getToken();
+  async function handleLogin(e?: React.FormEvent) {
+    e?.preventDefault();
+    setLoading(true);
+    setError('');
 
-    if (!token) {
-      router.push('/login');
-      return;
+    try {
+      await login(email, password);
+      router.push('/dashboard');
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'No se pudo iniciar sesión';
+      setError(message);
+    } finally {
+      setLoading(false);
     }
-
-    fetchLeads()
-      .then((data) => {
-        setLeads(data);
-      })
-      .catch((error) => {
-        if (error.message === 'NO_TOKEN' || error.message === 'UNAUTHORIZED') {
-          removeToken();
-          router.push('/login');
-          return;
-        }
-
-        console.error('Error cargando leads:', error);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [router]);
-
-  if (loading) {
-    return <div className="page-title">Cargando leads...</div>;
   }
 
   return (
-    <div>
-      <h1 className="page-title">Ventas / Leads</h1>
-
-      <div className="kpi-grid">
-        <div className="kpi-card">
-          <div className="kpi-label">Total Leads</div>
-          <div className="kpi-value">{leads.length}</div>
-        </div>
-
-        <div className="kpi-card">
-          <div className="kpi-label">Nuevos</div>
-          <div className="kpi-value">
-            {leads.filter((l) => l.status === 'new').length}
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background:
+          'linear-gradient(135deg, #081120 0%, #0f172a 45%, #111827 100%)',
+        padding: 24,
+      }}
+    >
+      <form
+        onSubmit={handleLogin}
+        style={{
+          width: '100%',
+          maxWidth: 420,
+          background: 'rgba(17, 24, 39, 0.95)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 18,
+          padding: 28,
+          boxShadow: '0 20px 50px rgba(0,0,0,0.35)',
+        }}
+      >
+        <div style={{ marginBottom: 22 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: 1.2,
+              color: '#22c55e',
+              marginBottom: 8,
+            }}
+          >
+            CRM DEMO
           </div>
-        </div>
 
-        <div className="kpi-card">
-          <div className="kpi-label">En gestión</div>
-          <div className="kpi-value">
-            {leads.filter((l) => l.status === 'contacted').length}
-          </div>
-        </div>
+          <h1
+            style={{
+              fontSize: 30,
+              lineHeight: 1.1,
+              fontWeight: 800,
+              color: '#ffffff',
+              margin: 0,
+              marginBottom: 8,
+            }}
+          >
+            Iniciar sesión
+          </h1>
 
-        <div className="kpi-card">
-          <div className="kpi-label">Cierre</div>
-          <div className="kpi-value">
-            {leads.filter((l) => l.status === 'closed').length}
-          </div>
-        </div>
-      </div>
-
-      <div className="panel-grid">
-        <div className="panel">
-          <div className="panel-title">Actividad Comercial</div>
-          <p style={{ color: '#64748b' }}>
-            Aquí pondremos el gráfico tipo Power BI en el siguiente paso
+          <p
+            style={{
+              margin: 0,
+              color: '#9ca3af',
+              fontSize: 14,
+            }}
+          >
+            Accede con el usuario real del backend JWT.
           </p>
         </div>
 
-        <div className="panel">
-          <div className="panel-title">Resumen</div>
-          <p style={{ color: '#64748b' }}>
-            Conversión, pipeline, performance
-          </p>
-        </div>
-      </div>
+        <label
+          style={{
+            display: 'block',
+            color: '#e5e7eb',
+            fontSize: 14,
+            fontWeight: 700,
+            marginBottom: 8,
+          }}
+        >
+          Email
+        </label>
 
-      <div className="table-wrap">
-        <div className="panel-title">Lista de Leads</div>
+        <input
+          type="email"
+          placeholder="admin@crm.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          style={{
+            width: '100%',
+            padding: 12,
+            marginBottom: 16,
+            borderRadius: 10,
+            border: '1px solid #374151',
+            background: '#111827',
+            color: '#ffffff',
+            outline: 'none',
+            fontSize: 14,
+          }}
+        />
 
-        <input className="search-input" placeholder="Buscar..." />
+        <label
+          style={{
+            display: 'block',
+            color: '#e5e7eb',
+            fontSize: 14,
+            fontWeight: 700,
+            marginBottom: 8,
+          }}
+        >
+          Contraseña
+        </label>
 
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Email</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {leads.map((lead) => (
-              <tr key={lead.id}>
-                <td>
-                  {lead.firstName} {lead.lastName}
-                </td>
-                <td>{lead.email}</td>
-                <td>
-                  <span className="status-badge">{lead.status}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <input
+          type="password"
+          placeholder="123456"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          style={{
+            width: '100%',
+            padding: 12,
+            marginBottom: 18,
+            borderRadius: 10,
+            border: '1px solid #374151',
+            background: '#111827',
+            color: '#ffffff',
+            outline: 'none',
+            fontSize: 14,
+          }}
+        />
+
+        {error ? (
+          <div
+            style={{
+              background: 'rgba(127, 29, 29, 0.28)',
+              border: '1px solid #ef4444',
+              color: '#fecaca',
+              padding: 12,
+              borderRadius: 10,
+              marginBottom: 16,
+              fontSize: 14,
+            }}
+          >
+            {error}
+          </div>
+        ) : null}
+
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            width: '100%',
+            padding: 13,
+            background: loading ? '#166534' : '#22c55e',
+            color: '#04130a',
+            borderRadius: 10,
+            border: 'none',
+            fontWeight: 800,
+            fontSize: 15,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.8 : 1,
+          }}
+        >
+          {loading ? 'Ingresando...' : 'Ingresar'}
+        </button>
+      </form>
     </div>
   );
 }

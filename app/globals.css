@@ -201,3 +201,116 @@ a {
     grid-template-columns: 1fr;
   }
 }
+.crm-sidebar {
+  background: linear-gradient(180deg, #081225 0%, #0b1730 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.crm-logo {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+  margin-bottom: 18px;
+}
+
+.crm-logo span {
+  color: #475569;
+  font-weight: 600;
+}
+
+.crm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.crm-nav a {
+  display: block;
+  color: rgba(255, 255, 255, 0.92);
+  text-decoration: none;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.crm-nav a:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateX(2px);
+}
+
+.crm-nav a[href="/cobranzas"] {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.22), rgba(37, 99, 235, 0.08));
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+.crm-topbar {
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.05);
+}
+
+.crm-content {
+  background: #f4f7fb;
+}
+/* PANEL IZQUIERDO CARDS PREMIUM */
+
+.crm-sidebar + .crm-main .crm-content > div:first-child {
+  background: transparent;
+}
+
+/* tarjetas */
+.crm-content div {
+  transition: all 0.2s ease;
+}
+
+/* estilo general de cards */
+.crm-content .panel-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  border: 1px solid #e5e7eb;
+}
+
+/* hover suave */
+.crm-content .panel-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+/* títulos */
+.crm-content h3 {
+  font-size: 14px;
+  font-weight: 800;
+  color: #111827;
+}
+
+/* botones principales */
+.crm-content button {
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+/* botón principal azul */
+.crm-content button:first-of-type {
+  background: #2563eb;
+  color: white;
+}
+
+/* prioridades */
+.crm-content .critico {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.crm-content .urgente {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+
+.crm-content .normal {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}

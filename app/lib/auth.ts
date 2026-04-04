@@ -1,28 +1,20 @@
-export async function loginUser(email: string, password: string) {
-  const response = await fetch('http://localhost:3001/auth/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || 'Credenciales incorrectas');
-  }
-
-  return response.json();
-}
+const TOKEN_KEY = 'crm_token';
 
 export function saveToken(token: string) {
-  localStorage.setItem('crm_token', token);
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(TOKEN_KEY, token);
 }
 
 export function getToken() {
-  return localStorage.getItem('crm_token');
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 export function removeToken() {
-  localStorage.removeItem('crm_token');
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export function isAuthenticated() {
+  return !!getToken();
 }
