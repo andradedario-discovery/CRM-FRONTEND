@@ -409,57 +409,22 @@ function buildWhatsappMessage(row: CobranzaRow) {
 }
 
 export default function Page() {
-    const [activeTab, setActiveTab] = useState<TabType>('Cobranzas');
+  const [activeTab, setActiveTab] = useState<TabType>('Cobranzas');
   const [rows, setRows] = useState<CobranzaRow[]>([]);
-  const [isLoadingRows, setIsLoadingRows] = useState(true);
-  const [rowsError, setRowsError] = useState<string | null>(null);
-
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadRows() {
-      setIsLoadingRows(true);
-      setRowsError(null);
-
-      try {
-        const host = window.location.hostname;
-        const response = await fetch(
-          `http://${host}:3001/cobranzas/current`,
-          {
-            cache: 'no-store',
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error(`Error ${response.status} cargando cobranzas/current`);
-        }
-
-        const data = await response.json();
-        const nextRows = Array.isArray(data?.rows) ? data.rows : [];
-
-        if (!isMounted) return;
-
-        setRows(nextRows);
-      } catch (error) {
-        console.error('Error cargando cobranzas desde backend:', error);
-
-        if (!isMounted) return;
-
-        // setRows([]);
-        setRowsError('No se pudo cargar la base de cobranzas desde el backend.');
-      } finally {
-        if (isMounted) {
-          setIsLoadingRows(false);
-        }
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setRows(parsed);
       }
     }
-
-    loadRows();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  } catch (err) {
+    console.error('Error leyendo localStorage', err);
+  }
+}, []);
+  const [storageReady, setStorageReady] = useState(false);
   const [filter, setFilter] = useState<BlockFilter>('Todos');
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
@@ -473,59 +438,58 @@ export default function Page() {
   const [assignMessage, setAssignMessage] = useState('');
 const [callAlert, setCallAlert] = useState<any>(null);
 const [showAutomationDemo, setShowAutomationDemo] = useState(false);
-  
-    useEffect(() => {
-    if (typeof window === 'undefined') return;
+  useEffect(() => {
+  try {
+    const savedRows = localStorage.getItem(STORAGE_KEY);
+    const savedSelected = localStorage.getItem(SELECTED_STORAGE_KEY);
+    const savedTab = localStorage.getItem(ACTIVE_TAB_KEY) as TabType | null;
 
-    try {
-      const savedTab = window.localStorage.getItem(ACTIVE_TAB_KEY);
-      if (savedTab === 'Cobranzas' || savedTab === 'Jurídico') {
-        setActiveTab(savedTab as TabType);
+    if (savedRows) {
+      const parsedRows = JSON.parse(savedRows);
+      if (Array.isArray(parsedRows) && parsedRows.length > 0) {
+        setRows(parsedRows);
       }
-    } catch (error) {
-      console.error('No se pudo leer activeTab desde localStorage', error);
     }
 
-    try {
-      const savedSelectedRaw = window.localStorage.getItem(SELECTED_STORAGE_KEY);
-      if (savedSelectedRaw) {
-        const savedSelected = JSON.parse(savedSelectedRaw);
-        if (savedSelected && typeof savedSelected === 'object') {
-          setSelected(savedSelected);
-        }
-      }
-    } catch (error) {
-      console.error('No se pudo leer selected desde localStorage', error);
+    if (savedSelected) {
+      setSelected(JSON.parse(savedSelected));
     }
-  }, []);
 
+    if (savedTab === 'Cobranzas' || savedTab === 'Jurídico') {
+      setActiveTab(savedTab);
+    }
+  } catch (err) {
+    console.error('Error cargando cobranzas:', err);
+  } finally {
+    setStorageReady(true);
+  }
+}, []);
+
+ useEffect(() => {
+  if (!storageReady) return;
+  if (!rows || rows.length === 0) return;
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+  } catch (err) {
+    console.error('Error guardando cobranzas:', err);
+  }
+}, [rows, storageReady]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
     try {
-      if (selected) {
-        window.localStorage.setItem(
-          SELECTED_STORAGE_KEY,
-          JSON.stringify(selected)
-        );
-      } else {
-        window.localStorage.removeItem(SELECTED_STORAGE_KEY);
-      }
-    } catch (error) {
-      console.error('No se pudo guardar selected en localStorage', error);
-    }
+      localStorage.setItem(SELECTED_STORAGE_KEY, JSON.stringify(selected));
+    } catch {}
   }, [selected]);
 
-   useEffect(() => {
-    if (typeof window === 'undefined') return;
+ useEffect(() => {
+  if (!storageReady) return;
 
-    try {
-      window.localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
-    } catch (error) {
-      console.error('No se pudo guardar activeTab en localStorage', error);
-    }
-  }, [activeTab]);
+  try {
+    localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+  } catch {}
+}, [activeTab, storageReady]);
+
   useEffect(() => {
     const found = TEAM.find((p) => p.operator === assignOperator);
     if (found) setAssignGestor(found.gestor);
@@ -571,42 +535,6 @@ const [showAutomationDemo, setShowAutomationDemo] = useState(false);
       );
     });
   }, [rows, filter, search, activeTab]);
-    useEffect(() => {
-    let cancelled = false;
-
-    async function loadCurrentRows() {
-      try {
-       const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-        const response = await fetch(`${apiUrl}/cobranzas/current`, {
-          cache: 'no-store',
-        });
-
-        const data = await response.json();
-
-        if (cancelled) return;
-
-        const nextRows = Array.isArray(data?.rows) ? data.rows : [];
-        setRows(nextRows);
-
-        if (nextRows.length > 0) {
-          setActiveId((current) => current || nextRows[0].id);
-        } else {
-          setActiveId(null);
-        }
-      } catch (error) {
-        console.error('Error cargando cobranzas/current:', error);
-        if (cancelled) return;
-      // setRows([]);
-        setActiveId(null);
-      }
-    }
-
-    loadCurrentRows();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 useEffect(() => {
   const handler = (event: MessageEvent) => {
     if (event.data === 'close-demo') {
@@ -803,30 +731,12 @@ const porcentajeContactabilidad = (() => {
       };
     });
 
-    try {
-           const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-      const response = await fetch(`${apiUrl}/cobranzas/import`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ rows: imported }),
-      });
-
-      const data = await response.json();
-      console.log('IMPORT OK:', data);
-
-      const currentResponse = await fetch(`${apiUrl}/cobranzas/current`);
-      const currentData = await currentResponse.json();
-
-      setRows(currentData.rows || []);
-      setSelected({});
-      setActiveId(currentData.rows?.[0]?.id || null);
-      setAssignMessage('');
-      setFilter('Todos');
-    } catch (error) {
-      console.error('ERROR IMPORTANDO:', error);
-    }  }
+    setRows(imported);
+    setSelected({});
+    setActiveId(imported[0]?.id || null);
+    setAssignMessage('');
+    setFilter('Todos');
+  }
 
   function updateRow(id: string, updater: (row: CobranzaRow) => CobranzaRow) {
     setRows((prev) => prev.map((r) => (r.id === id ? updater(r) : r)));
@@ -1037,7 +947,7 @@ const porcentajeContactabilidad = (() => {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(SELECTED_STORAGE_KEY);
     localStorage.removeItem(ACTIVE_TAB_KEY);
-    // setRows([]);
+    setRows([]);
     setSelected({});
     setActiveId(null);
     setSearch('');
@@ -1125,13 +1035,15 @@ const porcentajeContactabilidad = (() => {
             <label style={{ ...primaryBtn, textAlign: 'center', cursor: 'pointer' }}>
               Cargar Excel
               <input
-  type="file"
-  accept=".xlsx,.xls,.csv"
-  onChange={(e) => {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-  }}
-/>
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFile(file);
+                  e.currentTarget.value = '';
+                }}
+              />
             </label>
 
             <button

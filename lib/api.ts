@@ -1,5 +1,8 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== 'undefined'
+    ? `http://${window.location.hostname}:3001`
+    : 'http://localhost:3001');
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('token') : null;
